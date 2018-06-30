@@ -1,3 +1,5 @@
+# From https://github.com/expo/expo/blob/master/android/.ci/android-base.Rockerfile
+
 FROM iilab/android:24.1.1
 
 RUN apt remove -y cmdtest && apt-get update && apt-get install apt-transport-https
@@ -29,7 +31,7 @@ RUN cd ./tools-public && yarn --pure-lockfile && yarn add /src/xdl/xdl-packaged.
 
 # Copy relevant files
 
-# ADD ./__internal__ /src/exponent/__internal__
+ADD ./__internal__ /src/exponent/__internal__
 ADD ./template-files /src/exponent/template-files
 ADD ./android /src/exponent/android
 ADD ./cpp /src/exponent/cpp
@@ -45,5 +47,6 @@ RUN cd ./tools-public && \
     --buildConstantsPath ../android/expoview/src/main/java/host/exp/exponent/generated/ExponentBuildConstants.java \
     --platform android
 
-CMD cd ./tools-public && \
-  gulp android-shell-app
+ENV TURTLE_WORKING_DIR_PATH /src/exponent
+
+CMD gulp android-shell-app
