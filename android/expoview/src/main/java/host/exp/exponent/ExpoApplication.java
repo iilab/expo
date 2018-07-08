@@ -78,10 +78,11 @@ public abstract class ExpoApplication extends MultiDexApplication {
     Exponent.initialize(this, this);
     NativeModuleDepsProvider.getInstance().add(Kernel.class, KernelProvider.getInstance());
     Exponent.getInstance().setGCMSenderId(gcmSenderId());
-    
+
     NativeModuleDepsProvider.getInstance().inject(ExpoApplication.class, this);
 
-    if (!ExpoViewBuildConfig.DEBUG) {
+    // contentascode
+    if (false /* !ExpoViewBuildConfig.DEBUG */) {
       final CrashlyticsListener listener = new CrashlyticsListener() {
         @Override
         public void crashlyticsDidDetectCrashDuringPreviousExecution(){
