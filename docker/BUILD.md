@@ -21,7 +21,7 @@ It's unclear which approach will work best. I'm trying to:
   - Modify the `tools-public/gulpfile.js` in order to add the code (as it's not exported from `xdl` and not sufficiently modular as of know) that will:
     - Prepare the build by modifying the `app.json` to include the `bundledAssets` key. By:
       - Runing the forked `bundle-assets` command.
-    - Run the build with `gulp android-shell-app`
+      - Run the build with `gulp android-shell-app`
 
 ## Terminology
 
@@ -94,7 +94,7 @@ When serving the manifest and code locally, there is a missing `bundledAssets` k
 
   - `bundleAssertsAsync()` then uses the bundled manifest to grab the `bundledAssets` array and calls `src/detach/AssetBundle.js` which downloads the assets to the destination.
 
-  - ~~Then in the Android code, the HTTP calls are intercepted and pointed to the local assets in `android/expoview/src/main/java/host/exp/exponent/network/ExponentNetwork.java`~~ That's legacy code for sdk 24 which has been changed. The `android/expoview/src/main/java/abi25_0_0/host/exp/exponent/modules/api/FileSystemModule.java` 
+  - ~~Then in the Android code, the HTTP calls are intercepted and pointed to the local assets in `android/expoview/src/main/java/host/exp/exponent/network/ExponentNetwork.java`~~ That's legacy code for sdk 24 which has been changed. The `android/expoview/src/main/java/abi25_0_0/host/exp/exponent/modules/api/FileSystemModule.java`
 
   - Now the manifest served by `exp start` is pointing to `localhost:19001` so we could either:
     - Add a small modifying proxy that does JSON transformations
