@@ -19,17 +19,19 @@ ADD ./tools-public /src/exponent/tools-public
 RUN cd ./tools-public && yarn --pure-lockfile && yarn add /src/xdl/xdl-packaged.tgz && rm -rf /src/xdl
 
 # Make the expo server and react-native packager accessible from localhost
-
-RUN node tools-public/proxy.js & \
+# Preinstall gradle and project dependencies for faster builds using dev expo server
+RUN socat tcp-listen:19000,reuseaddr,fork tcp:host.docker.internal:19000 & \
+    socat tcp-listen:19001,reuseaddr,fork tcp:host.docker.internal:19001 & \
     sleep 5 && \
-# Preinstall gradle and project dependencies for faster builds
-     cd ./tools-public && gulp android-shell-app --url ${URL} --sdkVersion ${SDK_VERSION}
+    cd ./tools-public && gulp android-shell-app --url ${URL} --sdkVersion ${SDK_VERSION}
+
+ADD ./__internal__ /src/exponent/__internal__
+ADD ./android /src/exponent/android
 
 CMD bash -c \
-     "node tools-public/proxy.js & \
-      sleep 5 && \
-      mkdir -p /src/exponent/android-shell-app/app/build/intermediates/assets/prod/release && \
-      cd ./tools-public && \
-      gulp bundle-assets --projectRoot /src/js --sdkVersion ${SDK_VERSION} --dest /src/exponent/android-shell-app/app/build/intermediates/assets/prod/release && \
+     "cd ./tools-public && \
+      gulp generate-dynamic-macros \
+        --buildConstantsPath ../android/expoview/src/main/java/host/exp/exponent/generated/ExponentBuildConstants.java \
+        --platform android && \
       gulp android-shell-app --url ${URL} --sdkVersion ${SDK_VERSION} --keystore ${KEYSTORE_PATH} --alias ${KEY_ALIAS} --keystorePassword ${KEYSTORE_PASSWORD} --keyPassword ${KEY_PASSWORD} && \
-      mv /tmp/shell-debug.apk /build/${APK_FILENAME}.apk "
+      mv /tmp/shell-signed.apk /build/${APK_FILENAME}.apk "
