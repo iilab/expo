@@ -36,6 +36,9 @@ android {
     manifestPlaceholders = [
       'appAuthRedirectScheme': 'host.exp.exponent'
     ]
+
+    // contentascode: Disable fabric build ID generation 
+    ext.enableCrashlytics = false
   }
   dexOptions {
     javaMaxHeapSize System.getenv("DISABLE_DEX_MAX_HEAP") ? null : "8g"
