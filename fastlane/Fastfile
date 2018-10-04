@@ -9,11 +9,22 @@ default_platform :ios
 # path relative to Fastfile
 output_directory = File.expand_path('./Deployment')
 
+# build variables (expo client)
+# ./ios/Exponent/Supporting/Info.plist
+# APP_NAME = "Exponent"
+# APP_PATH = "ios/#{APP_NAME}"
+
+# build variables (standalone app)
+# ./shellAppWorkspaces/ios/default/ExpoKitApp/Supporting/Info.plist
+APP_NAME = "ExpoKitApp"
+APP_PATH = "shellAppWorkspaces/ios/default/#{APP_NAME}"
+
+
 def set_bundle_version_from_commit_count
   bundle_version = Actions.lane_context[SharedValues::VERSION_NUMBER] + ".10" + number_of_commits.to_s
   puts "Setting build number (CFBundleVersion) to '" + bundle_version + "'..."
   set_info_plist_value(
-    path: "./ios/Exponent/Supporting/Info.plist",
+    path: "./#{APP_PATH}/Supporting/Info.plist",
     key: "CFBundleVersion",
     value: bundle_version
   )
@@ -22,7 +33,7 @@ end
 def clear_bundle_version
   puts "removing CFBundleVersion..."
   update_plist(
-    plist_path: "./ios/Exponent/Supporting/Info.plist",
+    plist_path: "./#{APP_PATH}/Supporting/Info.plist",
     block: proc do |plist|
       plist.delete("CFBundleVersion")
     end
@@ -34,14 +45,14 @@ platform :ios do
   before_all do
     FileUtils.mkdir_p(output_directory)
     Actions.lane_context[SharedValues::VERSION_NUMBER] = get_version_number(
-      xcodeproj: "./ios/Exponent.xcodeproj"
+      xcodeproj: "./#{APP_PATH}.xcodeproj"
     )
     set_bundle_version_from_commit_count
   end
 
   lane :test do
     scan(
-      workspace: "ios/Exponent.xcworkspace",
+      workspace: "#{APP_PATH}.xcworkspace",
       scheme: "Exponent",
       devices: ["iPhone SE", "iPhone X"],
       clean: false,
@@ -76,16 +87,33 @@ platform :ios do
     end.join ' '
 
     gym(
-      workspace: "ios/Exponent.xcworkspace",
+      workspace: "#{APP_PATH}.xcworkspace",
       scheme: "Exponent",
       configuration: "Release",
       xcargs: xcodebuild_args,
       clean: true,
       output_directory: output_directory,
-      output_name: "Exponent.ipa",
+      output_name: "#{APP_NAME}.ipa",
     )
 
     deliver()
+  end
+
+  lane :ipasign do |options|
+    xcargs_signing = {
+      :BUNDLE_IDENTIFIER => "com.wayfair.notify",
+      :PROVISIONING_PROFILE_SPECIFIER => "match AdHoc com.wayfair.notify",
+      :DEVELOPMENT_TEAM => "YB42T69E5P"
+    }
+
+    gym(
+      skip_build_archive: true,
+      archive_path: options[:archive_path],
+      xcargs: xcargs_signing,
+      export_method: "ad-hoc",
+      output_directory: output_directory,
+      output_name: "#{APP_NAME}.ipa",
+    )
   end
 
   after_all do |lane|
