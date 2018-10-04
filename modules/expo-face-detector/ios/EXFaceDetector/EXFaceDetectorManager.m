@@ -4,12 +4,12 @@
 //
 //  Created by Stanisław Chmiela on 22.11.2017.
 //  Copyright © 2017 650 Industries. All rights reserved.
-//
 
 #import <EXFaceDetector/EXFaceEncoder.h>
 #import <EXFaceDetector/EXFaceDetectorUtils.h>
 #import <EXFaceDetector/EXFaceDetectorModule.h>
 #import <EXFaceDetector/EXFaceDetectorManager.h>
+#import <EXFaceDetectorInterface/EXFaceDetectorManager.h>
 
 static const NSString *modeKeyPath = @"mode";
 static const NSString *detectLandmarksKeyPath = @"detectLandmarks";
@@ -30,12 +30,6 @@ static const NSString *runClassificationsKeyPath = @"runClassifications";
 @end
 
 @implementation EXFaceDetectorManager
-
-EX_REGISTER_MODULE();
-
-+ (const NSArray<NSString *> *)internalModuleNames {
-  return @[@"FaceDetector"];
-}
 
 static NSDictionary *defaultFaceDetectorOptions = nil;
 
@@ -64,15 +58,19 @@ static NSDictionary *defaultFaceDetectorOptions = nil;
   
   if ([self isDetectingFaces] != newFaceDetecting) {
     _faceDetecting = newFaceDetecting;
+    __weak EXFaceDetectorManager *weakSelf = self;
     [self _runBlockIfQueueIsPresent:^{
-      if ([self isDetectingFaces]) {
-        if (_dataOutput) {
-          [self _setConnectionsEnabled:true];
+      __strong EXFaceDetectorManager *strongSelf = weakSelf;
+      if (strongSelf) {
+        if ([strongSelf isDetectingFaces]) {
+          if (strongSelf.dataOutput) {
+            [strongSelf _setConnectionsEnabled:true];
+          } else {
+            [strongSelf tryEnablingFaceDetection];
+          }
         } else {
-          [self tryEnablingFaceDetection];
+          [strongSelf _setConnectionsEnabled:false];
         }
-      } else {
-        [self _setConnectionsEnabled:false];
       }
     }];
   }

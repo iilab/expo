@@ -216,6 +216,8 @@ class Camera2 extends CameraViewImpl implements MediaRecorder.OnInfoListener, Me
 
     private final SizeMap mPictureSizes = new SizeMap();
 
+    private Size mPictureSize;
+
     private int mFacing;
 
     private AspectRatio mAspectRatio = Constants.DEFAULT_ASPECT_RATIO;
@@ -341,8 +343,48 @@ class Camera2 extends CameraViewImpl implements MediaRecorder.OnInfoListener, Me
     }
 
     @Override
+    int getCameraId() {
+        // We only use front/back-facing cameras, and according to CameraManager.getCameraIdList()
+        // docs, internal cameras (external cams are represented as another "facing") always
+        // use integers for their identifiers, so parseInt() should never fail.
+        return Integer.parseInt(mCameraId);
+    }
+
+    @Override
     Set<AspectRatio> getSupportedAspectRatios() {
         return mPreviewSizes.ratios();
+    }
+
+    @Override
+    SortedSet<Size> getAvailablePictureSizes(AspectRatio ratio) {
+        return mPictureSizes.sizes(ratio);
+    }
+
+    @Override
+    void setPictureSize(Size size) {
+        if (size == null) {
+          return;
+        }
+        if (mCaptureSession != null) {
+            try {
+                mCaptureSession.stopRepeating();
+            } catch (CameraAccessException e) {
+                e.printStackTrace();
+            }
+            mCaptureSession.close();
+            mCaptureSession = null;
+        }
+        if (mStillImageReader != null) {
+            mStillImageReader.close();
+        }
+        mPictureSize = size;
+        prepareStillImageReader();
+        startCaptureSession();
+    }
+
+    @Override
+    Size getPictureSize() {
+        return mPictureSize;
     }
 
     @Override
@@ -357,6 +399,7 @@ class Camera2 extends CameraViewImpl implements MediaRecorder.OnInfoListener, Me
             return false;
         }
         mAspectRatio = ratio;
+        mPictureSize = mPictureSizes.sizes(mAspectRatio).last();
         prepareStillImageReader();
         prepareScanImageReader();
         if (mCaptureSession != null) {
@@ -653,6 +696,9 @@ class Camera2 extends CameraViewImpl implements MediaRecorder.OnInfoListener, Me
         }
         mPictureSizes.clear();
         collectPictureSizes(mPictureSizes, map);
+        if (mPictureSize == null) {
+          mPictureSize = mPictureSizes.sizes(mAspectRatio).last();
+        }
         for (AspectRatio ratio : mPreviewSizes.ratios()) {
             if (!mPictureSizes.ratios().contains(ratio)) {
                 mPreviewSizes.remove(ratio);
@@ -674,8 +720,7 @@ class Camera2 extends CameraViewImpl implements MediaRecorder.OnInfoListener, Me
         if (mStillImageReader != null) {
             mStillImageReader.close();
         }
-        Size largest = mPictureSizes.sizes(mAspectRatio).last();
-        mStillImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
+        mStillImageReader = ImageReader.newInstance(mPictureSize.getWidth(), mPictureSize.getHeight(),
                 ImageFormat.JPEG, 1);
         mStillImageReader.setOnImageAvailableListener(mOnImageAvailableListener, null);
     }
@@ -726,6 +771,20 @@ class Camera2 extends CameraViewImpl implements MediaRecorder.OnInfoListener, Me
         } catch (CameraAccessException e) {
             mCallback.onMountError();
         }
+    }
+
+    @Override
+    public void resumePreview() {
+        startCaptureSession();
+    }
+
+    @Override
+    public void pausePreview() {
+      try {
+        mCaptureSession.stopRepeating();
+      } catch (CameraAccessException e) {
+        e.printStackTrace();
+      }
     }
 
     public Surface getPreviewSurface() {
@@ -1022,10 +1081,10 @@ class Camera2 extends CameraViewImpl implements MediaRecorder.OnInfoListener, Me
         mMediaRecorder.setOutputFile(path);
         mVideoPath = path;
 
-        if (CamcorderProfile.hasProfile(Integer.parseInt(mCameraId), profile.quality)) {
+        if (CamcorderProfile.hasProfile(getCameraId(), profile.quality)) {
             setCamcorderProfile(profile, recordAudio);
         } else {
-            setCamcorderProfile(CamcorderProfile.get(CamcorderProfile.QUALITY_HIGH), recordAudio);
+            setCamcorderProfile(CamcorderProfile.get(getCameraId(), CamcorderProfile.QUALITY_HIGH), recordAudio);
         }
 
         mMediaRecorder.setOrientationHint(getOutputRotation());

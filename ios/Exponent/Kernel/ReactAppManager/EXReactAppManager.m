@@ -1,5 +1,4 @@
 #import "EXApiUtil.h"
-#import "EXAppLoadingManager.h"
 #import "EXBuildConstants.h"
 #import "EXEnvironment.h"
 #import "EXErrorRecoveryManager.h"
@@ -15,11 +14,27 @@
 #import "EXReactAppManager+Private.h"
 #import "EXVersionManager.h"
 #import "EXVersions.h"
+#import <EXCore/EXModuleRegistryProvider.h>
 
 #import <React/RCTBridge.h>
 #import <React/RCTRootView.h>
 
+@interface EXVersionManager (Legacy)
+// TODO: remove after non-unimodules SDK versions are dropped
+
+- (void)bridgeDidForeground;
+- (void)bridgeDidBackground;
+
+@end
+
 typedef void (^SDK21RCTSourceLoadBlock)(NSError *error, NSData *source, int64_t sourceLength);
+
+@protocol EXSplashScreenManagerProtocol
+
+@property (assign) BOOL started;
+@property (assign) BOOL finished;
+
+@end
 
 @implementation RCTSource (EXReactAppManager)
 
@@ -179,12 +194,17 @@ typedef void (^SDK21RCTSourceLoadBlock)(NSError *error, NSData *source, int64_t 
 
 - (void)appStateDidBecomeActive
 {
-  [_versionManager bridgeDidForeground];
+  if ([_versionManager respondsToSelector:@selector(bridgeDidForeground)]) {
+    // supported before SDK 29 / unimodules
+    [_versionManager bridgeDidForeground];
+  }
 }
 
 - (void)appStateDidBecomeInactive
 {
-  [_versionManager bridgeDidBackground];
+  if ([_versionManager respondsToSelector:@selector(bridgeDidBackground)]) {
+    [_versionManager bridgeDidBackground];
+  }
 }
 
 #pragma mark - EXAppFetcherDataSource
@@ -244,10 +264,12 @@ typedef void (^SDK21RCTSourceLoadBlock)(NSError *error, NSData *source, int64_t 
   _exceptionHandler = [[EXReactAppExceptionHandler alloc] initWithAppRecord:_appRecord];
 
   NSDictionary *params = @{
+                           @"bridge": bridge,
                            @"manifest": _appRecord.appLoader.manifest,
                            @"constants": @{
                                @"linkingUri": RCTNullIfNil([EXKernelLinkingManager linkingUriForExperienceUri:_appRecord.appLoader.manifestUrl useLegacy:[self _compareVersionTo:27] == NSOrderedAscending]),
-                               @"deviceId": [EXKernel deviceInstallUUID],
+                               @"experienceUrl": RCTNullIfNil(_appRecord.appLoader.manifestUrl? _appRecord.appLoader.manifestUrl.absoluteString: nil),
+                               @"installationId": [EXKernel deviceInstallUUID],
                                @"expoRuntimeVersion": [EXBuildConstants sharedInstance].expoRuntimeVersion,
                                @"manifest": _appRecord.appLoader.manifest,
                                @"appOwnership": [self _appOwnership],
@@ -258,6 +280,8 @@ typedef void (^SDK21RCTSourceLoadBlock)(NSError *error, NSData *source, int64_t 
                            @"isStandardDevMenuAllowed": @(isStandardDevMenuAllowed),
                            @"testEnvironment": @([EXEnvironment sharedEnvironment].testEnvironment),
                            @"services": [EXKernel sharedInstance].serviceRegistry.allServices,
+                           @"singletonModules": [EXModuleRegistryProvider singletonModules],
+                           @"moduleRegistryDelegateClass": RCTNullIfNil([self moduleRegistryDelegateClass]),
                            };
   return [self.versionManager extraModulesWithParams:params];
 }
@@ -372,7 +396,12 @@ typedef void (^SDK21RCTSourceLoadBlock)(NSError *error, NSData *source, int64_t 
 
 - (id)_appLoadingManagerInstance
 {
-  Class loadingManagerClass = [self versionedClassFromString:@"EXAppLoadingManager"];
+  Class loadingManagerClass;
+  if ([self _compareVersionTo:29] == NSOrderedAscending) {
+    loadingManagerClass = [self versionedClassFromString:@"EXAppLoadingManager"];
+  } else {
+    loadingManagerClass = [self versionedClassFromString:@"EXSplashScreen"];
+  }
   for (Class class in [self.reactBridge moduleClasses]) {
     if ([class isSubclassOfClass:loadingManagerClass]) {
       return [self.reactBridge moduleForClass:loadingManagerClass];
@@ -389,8 +418,9 @@ typedef void (^SDK21RCTSourceLoadBlock)(NSError *error, NSData *source, int64_t 
   if ([_appRecord.appManager rootView] &&
       [_appRecord.appManager rootView].subviews.count > 0 &&
       [_appRecord.appManager rootView].subviews.firstObject.subviews.count > 0) {
-    EXAppLoadingManager *appLoading = [self _appLoadingManagerInstance];
-    if (!appLoading || !appLoading.started || appLoading.finished) {
+    id<EXSplashScreenManagerProtocol> splashManager = [self _appLoadingManagerInstance];
+    
+    if (!splashManager || !splashManager.started || splashManager.finished) {
       [self _appLoadingFinished];
     }
   }
@@ -503,6 +533,14 @@ typedef void (^SDK21RCTSourceLoadBlock)(NSError *error, NSData *source, int64_t 
     return [ExpoKit sharedInstance].launchOptions;
   }
   return @{};
+}
+
+- (Class)moduleRegistryDelegateClass
+{
+  if ([EXEnvironment sharedEnvironment].isDetached) {
+    return [ExpoKit sharedInstance].moduleRegistryDelegateClass;
+  }
+  return nil;
 }
 
 - (NSString *)applicationKeyForRootView

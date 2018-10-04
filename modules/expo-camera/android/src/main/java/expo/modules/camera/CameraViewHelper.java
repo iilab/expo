@@ -11,7 +11,6 @@ import android.os.Build;
 import android.view.ViewGroup;
 
 import com.google.android.cameraview.CameraView;
-import com.google.android.gms.vision.barcode.Barcode;
 
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -19,12 +18,14 @@ import java.util.List;
 import java.util.Locale;
 
 import expo.core.interfaces.services.EventEmitter;
+import expo.interfaces.barcodescanner.BarCodeScannerResult;
 import expo.interfaces.facedetector.FaceDetector;
-import expo.modules.camera.events.BarCodeReadEvent;
+import expo.modules.camera.events.BarCodeScannedEvent;
 import expo.modules.camera.events.CameraMountErrorEvent;
 import expo.modules.camera.events.CameraReadyEvent;
 import expo.modules.camera.events.FaceDetectionErrorEvent;
 import expo.modules.camera.events.FacesDetectedEvent;
+import expo.modules.camera.events.PictureSavedEvent;
 
 public class CameraViewHelper {
   // Mount error event
@@ -43,8 +44,8 @@ public class CameraViewHelper {
 
   // Bar code read event
 
-  public static void emitBarCodeReadEvent(EventEmitter emitter, ViewGroup view, Barcode barCode) {
-    BarCodeReadEvent event = BarCodeReadEvent.obtain(view.getId(), barCode);
+  public static void emitBarCodeReadEvent(EventEmitter emitter, ViewGroup view, BarCodeScannerResult barCode) {
+    BarCodeScannedEvent event = BarCodeScannedEvent.obtain(view.getId(), barCode);
     emitter.emit(view.getId(), event);
   }
 
@@ -60,6 +61,13 @@ public class CameraViewHelper {
     emitter.emit(view.getId(), event);
   }
 
+  // Picture saved
+
+  public static void emitPictureSavedEvent(EventEmitter emitter, ViewGroup view, Bundle info) {
+    PictureSavedEvent event = PictureSavedEvent.obtain(info);
+    emitter.emit(view.getId(), event);
+  }
+
   // Utilities
 
   public static int getCorrectCameraRotation(int rotation, int facing) {
@@ -70,25 +78,25 @@ public class CameraViewHelper {
     }
   }
 
-  public static CamcorderProfile getCamcorderProfile(int quality) {
-    CamcorderProfile profile = CamcorderProfile.get(CamcorderProfile.QUALITY_HIGH);
+  public static CamcorderProfile getCamcorderProfile(int cameraId, int quality) {
+    CamcorderProfile profile = CamcorderProfile.get(cameraId, CamcorderProfile.QUALITY_HIGH);
     switch (quality) {
       case CameraModule.VIDEO_2160P:
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-          profile = CamcorderProfile.get(CamcorderProfile.QUALITY_2160P);
+          profile = CamcorderProfile.get(cameraId, CamcorderProfile.QUALITY_2160P);
         }
         break;
       case CameraModule.VIDEO_1080P:
-        profile = CamcorderProfile.get(CamcorderProfile.QUALITY_1080P);
+        profile = CamcorderProfile.get(cameraId, CamcorderProfile.QUALITY_1080P);
         break;
       case CameraModule.VIDEO_720P:
-        profile = CamcorderProfile.get(CamcorderProfile.QUALITY_720P);
+        profile = CamcorderProfile.get(cameraId, CamcorderProfile.QUALITY_720P);
         break;
       case CameraModule.VIDEO_480P:
-        profile = CamcorderProfile.get(CamcorderProfile.QUALITY_480P);
+        profile = CamcorderProfile.get(cameraId, CamcorderProfile.QUALITY_480P);
         break;
       case CameraModule.VIDEO_4x3:
-        profile = CamcorderProfile.get(CamcorderProfile.QUALITY_480P);
+        profile = CamcorderProfile.get(cameraId, CamcorderProfile.QUALITY_480P);
         profile.videoFrameWidth = 640;
         break;
     }
@@ -116,7 +124,7 @@ public class CameraViewHelper {
     }
 
     double[] latLong = exifInterface.getLatLong();
-    if (latLong.length >= 2) {
+    if (latLong != null) {
       exifMap.putDouble(ExifInterface.TAG_GPS_LATITUDE, latLong[0]);
       exifMap.putDouble(ExifInterface.TAG_GPS_LONGITUDE, latLong[1]);
       exifMap.putDouble(ExifInterface.TAG_GPS_ALTITUDE, exifInterface.getAltitude(0));

@@ -26,6 +26,7 @@ public class Constants {
     public List<Constants.EmbeddedResponse> EMBEDDED_RESPONSES;
     public int ANDROID_VERSION_CODE;
     public boolean FCM_ENABLED;
+    public boolean ANALYTICS_ENABLED;
   }
 
   private static final String TAG = Constants.class.getSimpleName();
@@ -48,6 +49,7 @@ public class Constants {
   public static boolean ARE_REMOTE_UPDATES_ENABLED = true;
   public static int ANDROID_VERSION_CODE;
   public static boolean FCM_ENABLED;
+  public static boolean ANALYTICS_ENABLED;
 
   public static void setSdkVersions(List<String> sdkVersions) {
     ABI_VERSIONS = TextUtils.join(",", sdkVersions);
@@ -61,13 +63,13 @@ public class Constants {
   static {
     List<String> abiVersions = new ArrayList<>();
     // THIS COMMENT IS USED BY android-build-aar.sh DO NOT MODIFY
+    abiVersions.add("30.0.0");
+    abiVersions.add("29.0.0");
+    abiVersions.add("28.0.0");
     abiVersions.add("27.0.0");
     abiVersions.add("26.0.0");
     abiVersions.add("25.0.0");
     abiVersions.add("24.0.0");
-    abiVersions.add("23.0.0");
-    abiVersions.add("22.0.0");
-    abiVersions.add("21.0.0");
 
     if (TEMPORARY_ABI_VERSION != null) {
       abiVersions.add(TEMPORARY_ABI_VERSION);
@@ -94,6 +96,7 @@ public class Constants {
       ARE_REMOTE_UPDATES_ENABLED = appConstants.ARE_REMOTE_UPDATES_ENABLED;
       ANDROID_VERSION_CODE = appConstants.ANDROID_VERSION_CODE;
       FCM_ENABLED = appConstants.FCM_ENABLED;
+      ANALYTICS_ENABLED = appConstants.ANALYTICS_ENABLED;
 
       embeddedResponses.addAll(appConstants.EMBEDDED_RESPONSES);
       EMBEDDED_RESPONSES = embeddedResponses;
@@ -148,5 +151,15 @@ public class Constants {
 
   public static boolean isDetached() {
     return IS_DETACHED;
+  }
+
+  private static boolean sIsTest = false;
+
+  public static void setInTest() {
+    sIsTest = true;
+  }
+
+  public static boolean isTest() {
+    return sIsTest;
   }
 }

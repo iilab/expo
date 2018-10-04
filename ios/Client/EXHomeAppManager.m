@@ -17,6 +17,8 @@
 #import <React/RCTUtils.h>
 #import <React/RCTBridge.h>
 
+#import <EXCore/EXModuleRegistryProvider.h>
+
 NSString * const kEXHomeLaunchUrlDefaultsKey = @"EXKernelLaunchUrlDefaultsKey";
 NSString *kEXHomeBundleResourceName = @"kernel.ios";
 NSString *kEXHomeManifestResourceName = @"kernel-manifest";
@@ -49,10 +51,10 @@ NSString *kEXHomeManifestResourceName = @"kernel-manifest";
                    }];
 }
 
-- (void)getIsValidHomeManifestToOpen:(NSDictionary *)manifest completion:(void (^)(BOOL))completion
+- (void)getIsValidHomeManifestToOpen:(NSDictionary *)manifest manifestUrl:(NSURL *) manifestUrl completion:(void (^)(BOOL))completion
 {
   [self _dispatchHomeJSEvent:@"getIsValidHomeManifestToOpen"
-                        body:@{ @"manifest": manifest }
+                        body:@{ @"manifest": manifest, @"manifestUrl": manifestUrl.absoluteString }
                    onSuccess:^(NSDictionary *result) {
                      BOOL isValid = [result[@"isValid"] boolValue];
                      completion(isValid);
@@ -72,23 +74,24 @@ NSString *kEXHomeManifestResourceName = @"kernel-manifest";
 {
   NSMutableArray *modules = [NSMutableArray array];
   self.exceptionHandler = [[EXReactAppExceptionHandler alloc] initWithAppRecord:self.appRecord];
-  
-  // TODO: ben: common params impl?
+
   NSMutableDictionary *params = [@{
+                                   @"bridge": bridge,
+                                   @"browserModuleClass": [EXHomeModule class],
                                    @"constants": @{
-                                       @"deviceId": [EXKernel deviceInstallUUID],
+                                       @"installationId": [EXKernel deviceInstallUUID],
                                        @"expoRuntimeVersion": [EXBuildConstants sharedInstance].expoRuntimeVersion,
                                        @"linkingUri": @"exp://",
                                        @"manifest": self.appRecord.appLoader.manifest,
                                        @"appOwnership": @"expo",
                                      },
                                    @"exceptionsManagerDelegate": self.exceptionHandler,
-                                   @"kernel": [EXKernel sharedInstance],
                                    @"supportedSdkVersions": [EXVersions sharedInstance].versions[@"sdkVersions"],
                                    @"isDeveloper": @([EXBuildConstants sharedInstance].isDevKernel),
                                    @"isStandardDevMenuAllowed": @(YES), // kernel enables traditional RN dev menu
                                    @"manifest": self.appRecord.appLoader.manifest,
                                    @"services": [EXKernel sharedInstance].serviceRegistry.allServices,
+                                   @"singletonModules": [EXModuleRegistryProvider singletonModules],
                                    } mutableCopy];
   
 

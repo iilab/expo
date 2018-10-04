@@ -9,8 +9,7 @@ const minimist = require('minimist');
 const path = require('path');
 const _ = require('lodash');
 const {
-  IosClient,
-  IosIcons,
+  ImageUtils,
   IosShellApp,
   AndroidShellApp,
   AndroidKeystore,
@@ -83,6 +82,8 @@ function createAndroidShellAppWithArguments() {
     sdkVersion: 'Must run with `--sdkVersion SDK_VERSION`',
   });
 
+  setImageFunctions();
+
   return AndroidShellApp.createAndroidShellAppAsync(argv);
 }
 
@@ -91,6 +92,8 @@ function updateAndroidShellAppWithArguments() {
     url: 'Must run with `--url MANIFEST_URL`',
     sdkVersion: 'Must run with `--sdkVersion SDK_VERSION`',
   });
+
+  setImageFunctions();
 
   return AndroidShellApp.updateAndroidShellAppAsync(argv);
 }
@@ -108,13 +111,7 @@ function createAndroidKeystoreWithArguments() {
 }
 
 function createIOSShellAppWithArguments() {
-  const { resizeIconWithSharpAsync, getImageDimensionsWithSharpAsync } = require('./image-helpers');
-  logger.info(
-    { buildPhase: 'icons setup' },
-    'IosIcons: setting image functions to alternative sharp implementations'
-  );
-  IosIcons.setResizeImageFunction(resizeIconWithSharpAsync);
-  IosIcons.setGetImageDimensionsFunction(getImageDimensionsWithSharpAsync);
+  setImageFunctions();
 
   if (argv.action === 'build') {
     return IosShellApp.buildAndCopyArtifactAsync(argv);
@@ -125,16 +122,6 @@ function createIOSShellAppWithArguments() {
   } else {
     throw new Error(`Unsupported action '${argv.action}'.`);
   }
-}
-
-function buildIOSClientWithArguments() {
-  const { type, configuration, verbose } = argv;
-  return IosClient.buildAsync(type, configuration, verbose);
-}
-
-function configureIOSClientBundleWithArguments() {
-  const { archivePath, bundleId, appleTeamId } = argv;
-  return IosClient.configureBundleAsync(archivePath, bundleId, appleTeamId);
 }
 
 function createIOSKeychainWithArguments() {
@@ -173,9 +160,12 @@ function buildAndSignIpaWithArguments() {
     certPassword: 'Must run with `--certPassword CERT_PASSWORD`',
     teamID: 'Must run with `--teamID TEAM_ID`',
     bundleIdentifier: 'Must run with `--bundleIdentifier BUNDLE_IDENTIFIER`',
+    manifestPath: 'Must run with `--manifestPath MANIFEST_PATH`',
   });
 
-  const builder = createIPABuilder(argv);
+  const manifest = JSON.parse(fs.readFileSync(argv.manifestPath, 'utf8'));
+
+  const builder = createIPABuilder({ manifest, ...argv });
   return builder.build();
 }
 
@@ -185,6 +175,16 @@ function validateArgv(errors) {
       throw new Error(errors[fieldName]);
     }
   });
+}
+
+function setImageFunctions() {
+  const { resizeIconWithSharpAsync, getImageDimensionsWithSharpAsync } = require('./image-helpers');
+  logger.info(
+    { buildPhase: 'icons setup' },
+    'ImageUtils: setting image functions to alternative sharp implementations'
+  );
+  ImageUtils.setResizeImageFunction(resizeIconWithSharpAsync);
+  ImageUtils.setGetImageDimensionsFunction(getImageDimensionsWithSharpAsync);
 }
 
 let watcher = null;
@@ -214,8 +214,6 @@ gulp.task('android:create-keystore', createAndroidKeystoreWithArguments);
 
 // iOS
 gulp.task('ios-shell-app', createIOSShellAppWithArguments);
-gulp.task('build-ios-client', buildIOSClientWithArguments);
-gulp.task('ios:configure-client-bundle', configureIOSClientBundleWithArguments);
 gulp.task('ios:create-keychain', createIOSKeychainWithArguments);
 gulp.task('ios:import-cert-into-keychain', importCertIntoIOSKeychainWithArguments);
 gulp.task('ios:delete-keychain', deleteIOSKeychainWithArguments);

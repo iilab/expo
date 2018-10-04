@@ -22,10 +22,9 @@
   NSString *scope = @"none";
   
   CLAuthorizationStatus systemStatus;
-  NSString *alwaysUsageDescription = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationAlwaysUsageDescription"];
   NSString *whenInUseUsageDescription = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationWhenInUseUsageDescription"];
-  if (!(alwaysUsageDescription || whenInUseUsageDescription)) {
-    EXFatal(EXErrorWithMessage(@"This app is missing NSLocationAlwaysUsageDescription or NSLocationWhenInUseUsageDescription, so location services will fail. Add one of these keys to your bundle's Info.plist."));
+  if (!whenInUseUsageDescription) {
+    EXFatal(EXErrorWithMessage(@"This app is missing NSLocationWhenInUseUsageDescription, so location services will fail. Add one of these keys to your bundle's Info.plist."));
     systemStatus = kCLAuthorizationStatusDenied;
   } else {
     systemStatus = [CLLocationManager authorizationStatus];
@@ -78,14 +77,11 @@
     _locMgr = [[CLLocationManager alloc] init];
     _locMgr.delegate = self;
 
-    if ([[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationAlwaysUsageDescription"] &&
-        [_locMgr respondsToSelector:@selector(requestAlwaysAuthorization)]) {
-        [_locMgr requestAlwaysAuthorization];
-    } else if ([[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationWhenInUseUsageDescription"] &&
+    if ([[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSLocationWhenInUseUsageDescription"] &&
                [_locMgr respondsToSelector:@selector(requestWhenInUseAuthorization)]) {
         [_locMgr requestWhenInUseAuthorization];
     } else {
-      _reject(@"E_LOCATION_INFO_PLIST", @"Either NSLocationWhenInUseUsageDescription or NSLocationAlwaysUsageDescription key must be present in Info.plist to use geolocation.", nil);
+      _reject(@"E_LOCATION_INFO_PLIST", @"Either NSLocationWhenInUseUsageDescription key must be present in Info.plist to use geolocation.", nil);
       if (_delegate) {
         [_delegate permissionRequesterDidFinish:self];
       }
@@ -114,6 +110,10 @@
 
 - (void)locationManager:(CLLocationManager *)manager didChangeAuthorizationStatus:(CLAuthorizationStatus)status
 {
+  // TODO: Permissions.LOCATION issue (search by this phrase)
+  // if Permissions.LOCATION is being called for the first time on iOS devide and prompts for user action it might not call this callback at all
+  // it happens if user requests more that one permission at the same time via Permissions.askAsync(...) and LOCATION dialog is not being called first
+  // to reproduce this find NCL code testing that
   if (status == kCLAuthorizationStatusNotDetermined) {
     // CLLocationManager calls this delegate method once on start with kCLAuthorizationNotDetermined even before the user responds
     // to the "Don't Allow" / "Allow" dialog box. This isn't the event we care about so we skip it. See:

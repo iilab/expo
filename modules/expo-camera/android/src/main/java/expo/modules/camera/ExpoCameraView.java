@@ -8,13 +8,10 @@ import android.media.CamcorderProfile;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.v4.content.ContextCompat;
-import android.util.Log;
 import android.view.View;
 
 import com.google.android.cameraview.CameraView;
-import com.google.android.gms.vision.barcode.Barcode;
-import com.google.android.gms.vision.barcode.BarcodeDetector;
+import com.google.android.cameraview.Size;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,28 +27,34 @@ import expo.core.ModuleRegistry;
 import expo.core.Promise;
 import expo.core.interfaces.services.EventEmitter;
 import expo.core.interfaces.services.UIManager;
+import expo.interfaces.barcodescanner.BarCodeScanner;
+import expo.interfaces.barcodescanner.BarCodeScannerProvider;
+import expo.interfaces.barcodescanner.BarCodeScannerResult;
+import expo.interfaces.barcodescanner.BarCodeScannerSettings;
+import expo.interfaces.camera.ExpoCameraViewInterface;
 import expo.interfaces.facedetector.FaceDetector;
 import expo.interfaces.facedetector.FaceDetectorProvider;
-import expo.interfaces.filesystem.FileSystem;
+import expo.interfaces.permissions.Permissions;
 import expo.modules.camera.tasks.BarCodeScannerAsyncTask;
 import expo.modules.camera.tasks.BarCodeScannerAsyncTaskDelegate;
 import expo.modules.camera.tasks.FaceDetectorAsyncTask;
 import expo.modules.camera.tasks.FaceDetectorAsyncTaskDelegate;
+import expo.modules.camera.tasks.PictureSavedDelegate;
 import expo.modules.camera.tasks.ResolveTakenPictureAsyncTask;
+import expo.modules.camera.utils.FileSystemUtils;
 import expo.modules.camera.utils.ImageDimensions;
 
-public class ExpoCameraView extends CameraView implements LifecycleEventListener, BarCodeScannerAsyncTaskDelegate, FaceDetectorAsyncTaskDelegate {
+public class ExpoCameraView extends CameraView implements LifecycleEventListener, BarCodeScannerAsyncTaskDelegate, FaceDetectorAsyncTaskDelegate, PictureSavedDelegate, ExpoCameraViewInterface {
   private static final String MUTE_KEY = "mute";
   private static final String QUALITY_KEY = "quality";
+  private static final String FAST_MODE_KEY = "fastMode";
   private static final String MAX_DURATION_KEY = "maxDuration";
   private static final String MAX_FILE_SIZE_KEY = "maxFileSize";
-  private Context mThemedReactContext;
 
   private Queue<Promise> mPictureTakenPromises = new ConcurrentLinkedQueue<>();
   private Map<Promise, Map<String, Object>> mPictureTakenOptions = new ConcurrentHashMap<>();
   private Map<Promise, File> mPictureTakenDirectories = new ConcurrentHashMap<>();
   private Promise mVideoRecordedPromise;
-  private List<Integer> mBarCodeTypes = null;
 
   private boolean mIsPaused = false;
   private boolean mIsNew = true;
@@ -61,7 +64,7 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
   public volatile boolean faceDetectorTaskLock = false;
 
   // Scanning-related properties
-  private BarcodeDetector mDetector;
+  private BarCodeScanner mBarCodeScanner;
   private FaceDetector mFaceDetector;
   private boolean mShouldDetectFaces = false;
   private boolean mShouldScanBarCodes = false;
@@ -71,8 +74,7 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
   public ExpoCameraView(Context themedReactContext, ModuleRegistry moduleRegistry) {
     super(themedReactContext, true);
     mModuleRegistry = moduleRegistry;
-    mThemedReactContext = themedReactContext;
-    initBarcodeReader();
+    initBarCodeScanner();
 
     mModuleRegistry.getModule(UIManager.class).registerLifecycleEventListener(this);
 
@@ -92,12 +94,12 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
         Promise promise = mPictureTakenPromises.poll();
         final File cacheDirectory = mPictureTakenDirectories.remove(promise);
         Map<String, Object> options = mPictureTakenOptions.remove(promise);
-        FileSystem fileSystem = mModuleRegistry.getModule(FileSystem.class);
-        if (fileSystem == null) {
-          promise.reject("E_MODULE_REGISTRY", "No filesystem module avialable.");
-        } else {
-          new ResolveTakenPictureAsyncTask(data, promise, options, cacheDirectory, fileSystem).execute();
+
+        if (options.containsKey(FAST_MODE_KEY) && (Boolean) options.get(FAST_MODE_KEY)) {
+          promise.resolve(null);
         }
+
+        new ResolveTakenPictureAsyncTask(data, promise, options, cacheDirectory, ExpoCameraView.this).execute();
       }
 
       @Override
@@ -121,7 +123,7 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
         if (mShouldScanBarCodes && !barCodeScannerTaskLock && cameraView instanceof BarCodeScannerAsyncTaskDelegate) {
           barCodeScannerTaskLock = true;
           BarCodeScannerAsyncTaskDelegate delegate = (BarCodeScannerAsyncTaskDelegate) cameraView;
-          new BarCodeScannerAsyncTask(delegate, mDetector, data, width, height).execute();
+          new BarCodeScannerAsyncTask(delegate, mBarCodeScanner, data, width, height, rotation).execute();
         }
 
         if (mShouldDetectFaces && !faceDetectorTaskLock && cameraView instanceof FaceDetectorAsyncTaskDelegate) {
@@ -165,41 +167,47 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
     this.addView(this.getView(), 0);
   }
 
-  public void setBarCodeTypes(List<Integer> barCodeTypes) {
-    mBarCodeTypes = barCodeTypes;
-    initBarcodeReader();
-  }
-
   public void takePicture(Map<String, Object> options, final Promise promise, File cacheDirectory) {
     mPictureTakenPromises.add(promise);
     mPictureTakenOptions.put(promise, options);
     mPictureTakenDirectories.put(promise, cacheDirectory);
-    super.takePicture();
+    try {
+      super.takePicture();
+    } catch (Exception e) {
+      mPictureTakenPromises.remove(promise);
+      mPictureTakenOptions.remove(promise);
+      mPictureTakenDirectories.remove(promise);
+      throw e;
+    }
+  }
+
+  @Override
+  public void onPictureSaved(Bundle response) {
+    CameraViewHelper.emitPictureSavedEvent(mModuleRegistry.getModule(EventEmitter.class), this, response);
   }
 
   public void record(Map<String, Object> options, final Promise promise, File cacheDirectory) {
     try {
-      FileSystem fileSystem = mModuleRegistry.getModule(FileSystem.class);
-      String path = fileSystem.generateOutputPath(cacheDirectory, "Camera", ".mp4");
-      int maxDuration = -1;
+      String path = FileSystemUtils.generateOutputPath(cacheDirectory, "Camera", ".mp4");
+      double maxDuration = -1;
       if (options.get(MAX_DURATION_KEY) != null) {
-        maxDuration = (Integer) options.get(MAX_DURATION_KEY);
+        maxDuration = (double) options.get(MAX_DURATION_KEY);
       }
 
-      int maxFileSize = -1;
+      double maxFileSize = -1;
       if (options.get(MAX_FILE_SIZE_KEY) != null) {
-        maxFileSize = (Integer) options.get(MAX_FILE_SIZE_KEY);
+        maxFileSize = (double) options.get(MAX_FILE_SIZE_KEY);
       }
 
-      CamcorderProfile profile = CamcorderProfile.get(CamcorderProfile.QUALITY_HIGH);
+      CamcorderProfile profile = CamcorderProfile.get(getCameraId(), CamcorderProfile.QUALITY_HIGH);
       if (options.get(QUALITY_KEY) != null) {
-        profile = CameraViewHelper.getCamcorderProfile((Integer) options.get(QUALITY_KEY));
+        profile = CameraViewHelper.getCamcorderProfile(getCameraId(), ((Double) options.get(QUALITY_KEY)).intValue());
       }
 
       Boolean muteValue = (Boolean) options.get(MUTE_KEY);
       boolean recordAudio = muteValue == null || !muteValue;
 
-      if (super.record(path, maxDuration * 1000, maxFileSize, recordAudio, profile)) {
+      if (super.record(path, (int) maxDuration * 1000, (int) maxFileSize, recordAudio, profile)) {
         mVideoRecordedPromise = promise;
       } else {
         promise.reject("E_RECORDING_FAILED", "Starting video recording failed. Another recording might be in progress.");
@@ -210,23 +218,14 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
   }
 
   /**
-   * Initialize the barcode decoder.
+   * Initialize the barcode scanner.
    * Supports all iOS codes except [code138, code39mod43, itf14]
    * Additionally supports [codabar, code128, maxicode, rss14, rssexpanded, upc_a, upc_ean]
    */
-  private void initBarcodeReader() {
-    int barcodeFormats = 0;
-    if (mBarCodeTypes != null) {
-      for (Integer code : mBarCodeTypes) {
-        barcodeFormats = barcodeFormats | code;
-      }
-    }
-
-    mDetector = new BarcodeDetector.Builder(mThemedReactContext)
-        .setBarcodeFormats(barcodeFormats)
-        .build();
-    if (!mDetector.isOperational()) {
-      Log.w("ExpoCameraView", "Could not start barcode scanner.");
+  private void initBarCodeScanner() {
+    BarCodeScannerProvider barCodeScannerProvider = mModuleRegistry.getModule(BarCodeScannerProvider.class);
+    if (barCodeScannerProvider != null) {
+      mBarCodeScanner = barCodeScannerProvider.createBarCodeDetectorWithContext(getContext());
     }
   }
 
@@ -235,9 +234,15 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
     setScanning(mShouldScanBarCodes || mShouldDetectFaces);
   }
 
-  public void onBarCodeRead(Barcode barCode) {
-    int barCodeType = barCode.format;
-    if (!mShouldScanBarCodes || !mBarCodeTypes.contains(barCodeType)) {
+  public void setBarCodeScannerSettings(BarCodeScannerSettings settings) {
+    if (mBarCodeScanner != null) {
+      mBarCodeScanner.setSettings(settings);
+    }
+  }
+
+  @Override
+  public void onBarCodeScanned(BarCodeScannerResult barCode) {
+    if (!mShouldScanBarCodes) {
       return;
     }
 
@@ -246,6 +251,11 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
 
   public void onBarCodeScanningTaskCompleted() {
     barCodeScannerTaskLock = false;
+  }
+
+  public int[] getPreviewSizeAsArray() {
+    Size previewSize = getPreviewSize();
+    return new int[]{previewSize.getWidth(), previewSize.getHeight()};
   }
 
   @Override
@@ -288,12 +298,8 @@ public class ExpoCameraView extends CameraView implements LifecycleEventListener
   }
 
   private boolean hasCameraPermissions() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      int result = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.CAMERA);
-      return result == PackageManager.PERMISSION_GRANTED;
-    } else {
-      return true;
-    }
+    int[] permissions = mModuleRegistry.getModule(Permissions.class).getPermissions(new String[]{ Manifest.permission.CAMERA });
+    return permissions.length == 1 && permissions[0] == PackageManager.PERMISSION_GRANTED;
   }
 
   public void setShouldDetectFaces(boolean shouldDetectFaces) {

@@ -15,7 +15,6 @@ import android.os.UserManager;
 import android.provider.Settings;
 import android.util.Log;
 
-import com.amplitude.api.Amplitude;
 import com.crashlytics.android.Crashlytics;
 import com.facebook.common.internal.ByteStreams;
 import com.facebook.drawee.backends.pipeline.Fresco;
@@ -41,7 +40,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.net.URLEncoder;
 import java.security.Provider;
 import java.security.Security;
@@ -52,6 +50,7 @@ import java.util.Map;
 
 import javax.inject.Inject;
 
+import expo.core.interfaces.Package;
 import expolib_v1.okhttp3.CacheControl;
 import expolib_v1.okhttp3.Call;
 import expolib_v1.okhttp3.Callback;
@@ -60,20 +59,22 @@ import expolib_v1.okhttp3.Response;
 import host.exp.exponent.ABIVersion;
 import host.exp.exponent.ActivityResultListener;
 import host.exp.exponent.Constants;
+import host.exp.exponent.ExpoHandler;
 import host.exp.exponent.ExponentManifest;
 import host.exp.exponent.RNObject;
 import host.exp.exponent.analytics.Analytics;
 import host.exp.exponent.analytics.EXL;
 import host.exp.exponent.di.NativeModuleDepsProvider;
-import host.exp.exponent.generated.ExponentKeys;
 import host.exp.exponent.kernel.ExperienceId;
 import host.exp.exponent.kernel.ExponentUrls;
 import host.exp.exponent.kernel.KernelConstants;
-import host.exp.exponent.kernel.KernelProvider;
+import host.exp.exponent.network.ExpoHttpCallback;
+import host.exp.exponent.network.ExpoResponse;
 import host.exp.exponent.network.ExponentHttpClient;
 import host.exp.exponent.network.ExponentNetwork;
 import host.exp.exponent.storage.ExponentSharedPreferences;
 import host.exp.exponent.utils.PermissionsHelper;
+import versioned.host.exp.exponent.ExponentPackageDelegate;
 
 public class Exponent {
 
@@ -108,6 +109,9 @@ public class Exponent {
   @Inject
   ExponentSharedPreferences mExponentSharedPreferences;
 
+  @Inject
+  ExpoHandler mExpoHandler;
+
   public static void initialize(Context context, Application application) {
     if (sInstance == null) {
       new Exponent(context, application);
@@ -134,14 +138,14 @@ public class Exponent {
     // Verifying SSL certs is slow on Android, so send an HTTPS request to our server as early as possible.
     // This speeds up the manifest request in a shell app from ~500ms to ~250ms.
     try {
-      mExponentNetwork.getClient().call(new Request.Builder().url(Constants.API_HOST + "/status").build(), new Callback() {
+      mExponentNetwork.getClient().call(new Request.Builder().url(Constants.API_HOST + "/status").build(), new ExpoHttpCallback() {
         @Override
-        public void onFailure(Call call, IOException e) {
+        public void onFailure(IOException e) {
           EXL.d(TAG, e.toString());
         }
 
         @Override
-        public void onResponse(Call call, Response response) throws IOException {
+        public void onResponse(ExpoResponse response) throws IOException {
           ExponentNetwork.flushResponse(response);
           EXL.d(TAG, "Loaded exp.host status page.");
         }
@@ -154,32 +158,19 @@ public class Exponent {
     // Fixes Android memory leak
     try {
       UserManager.class.getMethod("get", Context.class).invoke(null, context);
-    } catch (IllegalAccessException e) {
-      e.printStackTrace();
-    } catch (InvocationTargetException e) {
-      e.printStackTrace();
-    } catch (NoSuchMethodException e) {
-      e.printStackTrace();
+    } catch (Throwable e) {
+      EXL.testError(e);
     }
-    Fresco.initialize(context);
+
+    try {
+      Fresco.initialize(context);
+    } catch (RuntimeException e) {
+      EXL.testError(e);
+    }
 
 
     // Amplitude
-    Analytics.resetAmplitudeDatabaseHelper();
-    Amplitude.getInstance().initialize(context, ExpoViewBuildConfig.DEBUG ? ExponentKeys.AMPLITUDE_DEV_KEY : ExponentKeys.AMPLITUDE_KEY);
-    if (application != null) {
-      Amplitude.getInstance().enableForegroundTracking(application);
-    }
-    try {
-      JSONObject amplitudeUserProperties = new JSONObject();
-      amplitudeUserProperties.put("INITIAL_URL", Constants.INITIAL_URL);
-      amplitudeUserProperties.put("ABI_VERSIONS", Constants.ABI_VERSIONS);
-      amplitudeUserProperties.put("TEMPORARY_ABI_VERSION", Constants.TEMPORARY_ABI_VERSION);
-      amplitudeUserProperties.put("IS_DETACHED", Constants.isDetached());
-      Amplitude.getInstance().setUserProperties(amplitudeUserProperties);
-    } catch (JSONException e) {
-      EXL.e(TAG, e);
-    }
+    Analytics.initializeAmplitude(context, application);
 
     // TODO: profile this
     FlowManager.init(context);
@@ -189,7 +180,11 @@ public class Exponent {
       Stetho.initializeWithDefaults(context);
     }
 
-    ImageLoader.getInstance().init(new ImageLoaderConfiguration.Builder(context).build());
+    try {
+      ImageLoader.getInstance().init(new ImageLoaderConfiguration.Builder(context).build());
+    } catch (RuntimeException e) {
+      EXL.testError(e);
+    }
 
     if (!ExpoViewBuildConfig.DEBUG) {
       // There are a few places in RN code that throw NetworkOnMainThreadException.
@@ -253,8 +248,10 @@ public class Exponent {
   }
 
   public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
-    mPermissionsHelper.onRequestPermissionsResult(requestCode, permissions, grantResults);
-    mPermissionsHelper = null;
+    if (permissions.length > 0 && grantResults.length > 0 && mPermissionsHelper != null) {
+      mPermissionsHelper.onRequestPermissionsResult(requestCode, permissions, grantResults);
+      mPermissionsHelper = null;
+    }
   }
 
 
@@ -263,6 +260,8 @@ public class Exponent {
     public String jsBundlePath;
     public RNObject linkingPackage;
     public Map<String, Object> experienceProperties;
+    public List<Package> expoPackages;
+    public ExponentPackageDelegate exponentPackageDelegate;
     public JSONObject manifest;
   }
 
@@ -372,15 +371,14 @@ public class Exponent {
       }
       Request request = requestBuilder.build();
       // Use OkHttpClient with long read timeout for dev bundles
-      final boolean finalShouldForceNetwork = shouldForceNetwork;
       ExponentHttpClient.SafeCallback callback = new ExponentHttpClient.SafeCallback() {
         @Override
-        public void onFailure(Call call, IOException e) {
+        public void onFailure(IOException e) {
           bundleListener.onError(e);
         }
 
         @Override
-        public void onResponse(Call call, Response response) {
+        public void onResponse(ExpoResponse response) {
           if (!response.isSuccessful()) {
             String body = "(could not render body)";
             try {
@@ -452,7 +450,7 @@ public class Exponent {
               printSourceFile(sourceFile.getAbsolutePath());
             }
 
-            new Handler(mContext.getMainLooper()).post(new Runnable() {
+            mExpoHandler.post(new Runnable() {
               @Override
               public void run() {
                 bundleListener.onBundleLoaded(sourceFile.getAbsolutePath());
@@ -464,9 +462,9 @@ public class Exponent {
         }
 
         @Override
-        public void onCachedResponse(Call call, Response response, boolean isEmbedded) {
+        public void onCachedResponse(ExpoResponse response, boolean isEmbedded) {
           EXL.d(TAG, "Using cached or embedded response.");
-          onResponse(call, response);
+          onResponse(response);
         }
       };
 
@@ -657,6 +655,7 @@ public class Exponent {
   public interface StartReactInstanceDelegate {
     boolean isDebugModeEnabled();
     boolean isInForeground();
+    ExponentPackageDelegate getExponentPackageDelegate();
     void handleUnreadNotifications(JSONArray unreadNotifications);
   }
 

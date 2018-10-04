@@ -31,10 +31,11 @@
     ABI27_0_0EXPermissionStatusGranted :
     ABI27_0_0EXPermissionStatusUndetermined;
   NSMutableDictionary *permissions = [[ABI27_0_0EXLocalNotificationRequester permissions] mutableCopy];
-  [permissions setValuesForKeysWithDictionary:@{
-                                                @"status": [ABI27_0_0EXPermissions permissionStringForStatus:status],
-                                                @"expires": ABI27_0_0EXPermissionExpiresNever,
-                                                }];
+  // In order to receive a device token, we need to have permission for user-facing notifications
+  if (status != ABI27_0_0EXPermissionStatusGranted) {
+    permissions[@"status"] = [ABI27_0_0EXPermissions permissionStringForStatus:status];
+  }
+  permissions[@"expires"] = ABI27_0_0EXPermissionExpiresNever;
   return permissions;
 }
 
@@ -54,7 +55,7 @@
   } else {
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(_handleDidRegisterForRemoteNotifications:)
-                                                 name:@"EXAppDidRegisterForRemoteNotificationsNotification"
+                                                 name:@"kEXAppDidRegisterForRemoteNotificationsNotification"
                                                object:nil];
     _localNotificationRequester = [[ABI27_0_0EXLocalNotificationRequester alloc] init];
     [_localNotificationRequester setDelegate:self];

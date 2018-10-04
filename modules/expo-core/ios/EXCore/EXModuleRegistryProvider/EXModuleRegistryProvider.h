@@ -5,6 +5,11 @@
 
 @interface EXModuleRegistryProvider : NSObject
 
+@property (nonatomic, weak) id<EXModuleRegistryDelegate> moduleRegistryDelegate;
+
++ (NSSet *)singletonModules;
+
+- (instancetype)initWithSingletonModules:(NSSet *)modules;
 - (EXModuleRegistry *)moduleRegistryForExperienceId:(NSString *)experienceId;
 
 @end

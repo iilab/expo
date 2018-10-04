@@ -178,7 +178,7 @@ NS_ASSUME_NONNULL_BEGIN
   if (!self.isBridgeAlreadyLoading) {
     self.isBridgeAlreadyLoading = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
-      _loadingView.manifest = manifest;
+      self->_loadingView.manifest = manifest;
       [self _enforceDesiredDeviceOrientation];
       [self _rebuildBridge];
     });
@@ -219,7 +219,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)appLoader:(EXAppLoader *)appLoader didLoadOptimisticManifest:(NSDictionary *)manifest
 {
-  [self _whenManifestIsValidToOpen:manifest performBlock:^{
+  [self _whenManifestIsValidToOpen:manifest manifestUrl:appLoader.manifestUrl performBlock:^{
     if ([EXKernel sharedInstance].browserController) {
       [[EXKernel sharedInstance].browserController addHistoryItemWithUrl:appLoader.manifestUrl manifest:manifest];
     }
@@ -230,16 +230,16 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)appLoader:(EXAppLoader *)appLoader didLoadBundleWithProgress:(EXLoadingProgress *)progress
 {
   dispatch_async(dispatch_get_main_queue(), ^{
-    [_loadingView updateStatusWithProgress:progress];
+    [self->_loadingView updateStatusWithProgress:progress];
   });
 }
 
 - (void)appLoader:(EXAppLoader *)appLoader didFinishLoadingManifest:(NSDictionary *)manifest bundle:(NSData *)data
 {
-  [self _whenManifestIsValidToOpen:manifest performBlock:^{
+  [self _whenManifestIsValidToOpen:manifest manifestUrl:appLoader.manifestUrl performBlock:^{
     [self _rebuildBridgeWithLoadingViewManifest:manifest];
-    if (_appRecord.appManager.status == kEXReactAppManagerStatusBridgeLoading) {
-      [_appRecord.appManager appLoaderFinished];
+    if (self->_appRecord.appManager.status == kEXReactAppManagerStatusBridgeLoading) {
+      [self->_appRecord.appManager appLoaderFinished];
     }
   }];
 }
@@ -448,16 +448,16 @@ NS_ASSUME_NONNULL_BEGIN
   }
 }
 
-- (void)_whenManifestIsValidToOpen:(NSDictionary *)manifest performBlock:(void (^)(void))block
+- (void)_whenManifestIsValidToOpen:(NSDictionary *)manifest manifestUrl:(NSURL *) manifestUrl performBlock:(void (^)(void))block
 {
   if (self.appRecord.appManager.requiresValidManifests && [EXKernel sharedInstance].browserController) {
-    [[EXKernel sharedInstance].browserController getIsValidHomeManifestToOpen:manifest completion:^(BOOL isValid) {
+    [[EXKernel sharedInstance].browserController getIsValidHomeManifestToOpen:manifest manifestUrl:manifestUrl completion:^(BOOL isValid) {
       if (isValid) {
         block();
       } else {
-        [self appLoader:_appRecord.appLoader didFailWithError:[NSError errorWithDomain:EXNetworkErrorDomain
-                                                                                  code:kEXErrorCodeAppForbidden
-                                                                              userInfo:@{ NSLocalizedDescriptionKey: @"Expo Client can only be used to view your own projects. To view this project, please ensure you are signed in to the same Expo account that created it." }]];
+        [self appLoader:self->_appRecord.appLoader didFailWithError:[NSError errorWithDomain:EXNetworkErrorDomain
+                                                                                        code:kEXErrorCodeAppForbidden
+                                                                                    userInfo:@{ NSLocalizedDescriptionKey: @"Expo Client can only be used to view your own projects. To view this project, please ensure you are signed in to the same Expo account that created it." }]];
       }
     }];
   } else {

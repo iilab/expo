@@ -14,9 +14,9 @@ $ npm install expo-core --save
 
 ### iOS (Cocoapods)
 
-If you're using Cocoapods, add the dependency to your `Podfile`:
+If you're using Cocoapods, add the following dependency to your `Podfile`:
 
-`pod 'EXCore'`
+`pod 'EXCore', path: '../node_modules/expo-core/ios'`
 
 and run `pod install`.
 
@@ -38,7 +38,15 @@ and run `pod install`.
     ```gradle
     compile project(':expo-core')
     ```
-
+3.  If you're using ProGuard, you'll need to append these lines to your ProGuard rules file for it not to strip out methods required for Expo modules to work.
+    ```pro
+    -keepclassmembers class * {
+      @expo.core.interfaces.ExpoProp *;
+    }
+    -keepclassmembers class * {
+      @expo.core.interfaces.ExpoMethod *;
+    }
+    ```
 
 ## Usage
 
@@ -55,11 +63,11 @@ and run `pod install`.
     ```
     method on the module registry.
 
-    On iOS its the consumer who defines required protocol. Implementations are identified by string. Dependants access the implementation by calling
+    On iOS its the consumer who defines required protocol. Implementations are identified by a protocol. Dependants access the implementation by calling
     ```objc
-    - (id)getModuleForName:(NSString *)name downcastedTo:(Protocol *)protocol exception:(NSException * __autoreleasing *)outException;
+    - (id)getModuleImplementingProtocol:(Protocol *)protocol;
     ```
-    method on the module registry. If `outException` argument is provided and an exception occurs (eg. argument mismatch is detected), it is filled with concrete exception data. Call to this function takes the module registered under `name` and tries to downcast it to the protocol provided.
+    method on the module registry.
 - **Module Registry** — well, a registry of modules. Instance of this class is used to fetch another internal or exported module.
 - **Exported methods** — a subset of instance methods of a given module that should get exposed to client code by specific platform adapter.
 - **Exported module** — a subclass of `{EX,expo.core.}ExportedModule`. Its methods annotated with `expo.core.ExpoMethod`/`EX_EXPORT_METHOD_AS` are exported to client code.
@@ -101,7 +109,7 @@ and run `pod install`.
 
 #### iOS
 
-When registering your module for export to client code, you must first decide whether the class will only be exported to client code or will it be both internal and exported module. If the former is applicable, you easily just subclass `EXExportedModule` and use macro `EX_EXPORT_MODULE(clientCodeName)` to provide a name under which it should be exported. If your module should be both internal and exported module, you also have to subclass `EXExportedModule`, but this time use `EX_REGISTER_MODULE()` in the implementation and then manually override methods `internalModuleNames` and `exportedModuleName`.
+When registering your module for export to client code, you must first decide whether the class will only be exported to client code or will it be both internal and exported module. If the former is applicable, you easily just subclass `EXExportedModule` and use macro `EX_EXPORT_MODULE(clientCodeName)` to provide a name under which it should be exported. If your module should be both internal and exported module, you also have to subclass `EXExportedModule`, but this time use `EX_REGISTER_MODULE()` in the implementation and then manually override methods `exportedInterfaces` and `exportedModuleName`.
 
 #### Android
 

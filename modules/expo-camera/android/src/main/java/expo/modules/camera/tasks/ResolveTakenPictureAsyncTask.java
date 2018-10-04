@@ -18,8 +18,8 @@ import java.io.IOException;
 import java.util.Map;
 
 import expo.core.Promise;
-import expo.interfaces.filesystem.FileSystem;
 import expo.modules.camera.CameraViewHelper;
+import expo.modules.camera.utils.FileSystemUtils;
 
 public class ResolveTakenPictureAsyncTask extends AsyncTask<Void, Void, Bundle> {
   private static final String DIRECTORY_NOT_FOUND_MSG = "Documents directory of the app could not be found.";
@@ -31,34 +31,38 @@ public class ResolveTakenPictureAsyncTask extends AsyncTask<Void, Void, Bundle> 
   private static final String DIRECTORY_NAME = "Camera";
   private static final String EXTENSION = ".jpg";
 
+  private static final String SKIP_PROCESSING_KEY = "skipProcessing";
+  private static final String FAST_MODE_KEY = "fastMode";
   private static final String QUALITY_KEY = "quality";
   private static final String BASE64_KEY = "base64";
   private static final String HEIGHT_KEY = "height";
   private static final String WIDTH_KEY = "width";
   private static final String EXIF_KEY = "exif";
+  private static final String DATA_KEY = "data";
   private static final String URI_KEY = "uri";
+  private static final String ID_KEY = "id";
 
   private Promise mPromise;
   private byte[] mImageData;
   private Bitmap mBitmap;
   private Map<String, Object> mOptions;
   private File mDirectory;
-  private FileSystem mFileSystem;
+  private PictureSavedDelegate mPictureSavedDelegate;
 
-  public ResolveTakenPictureAsyncTask(byte[] imageData, Promise promise, Map<String, Object> options, File directory, FileSystem fileSystem) {
+  public ResolveTakenPictureAsyncTask(byte[] imageData, Promise promise, Map<String, Object> options, File directory, PictureSavedDelegate delegate) {
     mPromise = promise;
     mOptions = options;
     mImageData = imageData;
     mDirectory = directory;
-    mFileSystem = fileSystem;
+    mPictureSavedDelegate = delegate;
   }
 
-  public ResolveTakenPictureAsyncTask(Bitmap bitmap, Promise promise, Map<String, Object> options, File directory, FileSystem fileSystem) {
+  public ResolveTakenPictureAsyncTask(Bitmap bitmap, Promise promise, Map<String, Object> options, File directory, PictureSavedDelegate delegate) {
     mPromise = promise;
     mBitmap = bitmap;
     mOptions = options;
     mDirectory = directory;
-    mFileSystem = fileSystem;
+    mPictureSavedDelegate = delegate;
   }
 
   private int getQuality() {
@@ -67,6 +71,11 @@ public class ResolveTakenPictureAsyncTask extends AsyncTask<Void, Void, Bundle> 
 
   @Override
   protected Bundle doInBackground(Void... voids) {
+    // handle SkipProcessing
+    if (mImageData != null && isOptionEnabled(SKIP_PROCESSING_KEY)) {
+      return handleSkipProcessing();
+    }
+
     Bundle response = new Bundle();
     ByteArrayInputStream inputStream = null;
 
@@ -147,13 +156,65 @@ public class ResolveTakenPictureAsyncTask extends AsyncTask<Void, Void, Bundle> 
     return null;
   }
 
+  private Bundle handleSkipProcessing() {
+    Bundle response = new Bundle();
+    try {
+      // save byte array (it's already a JPEG)
+      ByteArrayOutputStream imageStream = new ByteArrayOutputStream();
+      imageStream.write(mImageData);
+
+      // write compressed image to file in cache directory
+      String filePath = writeStreamToFile(imageStream);
+      File imageFile = new File(filePath);
+
+      // handle image uri
+      String fileUri = Uri.fromFile(imageFile).toString();
+      response.putString(URI_KEY, fileUri);
+
+      // read exif information
+      ExifInterface exifInterface = new ExifInterface(filePath);
+
+      // handle image dimensions
+      response.putInt(WIDTH_KEY, exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, -1));
+      response.putInt(HEIGHT_KEY, exifInterface.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, -1));
+
+      // handle exif request
+      if (isOptionEnabled(EXIF_KEY)) {
+        Bundle exifData = CameraViewHelper.getExifData(exifInterface);
+        response.putBundle(EXIF_KEY, exifData);
+      }
+
+      // handle base64
+      if (isOptionEnabled(BASE64_KEY)) {
+        response.putString(BASE64_KEY, Base64.encodeToString(mImageData, Base64.DEFAULT));
+      }
+
+      return response;
+    } catch (IOException e) {
+      mPromise.reject(ERROR_TAG, UNKNOWN_IO_EXCEPTION_MSG, e);
+      e.printStackTrace();
+    } catch (Exception e) {
+      mPromise.reject(ERROR_TAG, UNKNOWN_EXCEPTION_MSG, e);
+      e.printStackTrace();
+    }
+    // error occurred
+    return null;
+  }
+
   @Override
   protected void onPostExecute(Bundle response) {
     super.onPostExecute(response);
 
     // If the response is not null everything went well and we can resolve the promise.
     if (response != null) {
-      mPromise.resolve(response);
+      if (isOptionEnabled(FAST_MODE_KEY)) {
+        Bundle wrapper = new Bundle();
+        wrapper.putInt(ID_KEY, ((Double) mOptions.get(ID_KEY)).intValue());
+        wrapper.putBundle(DATA_KEY, response);
+        mPictureSavedDelegate.onPictureSaved(wrapper);
+      } else {
+        mPromise.resolve(response);
+      }
     }
   }
 
@@ -164,7 +225,7 @@ public class ResolveTakenPictureAsyncTask extends AsyncTask<Void, Void, Bundle> 
     FileOutputStream outputStream = null;
 
     try {
-      outputPath = mFileSystem.generateOutputPath(mDirectory, DIRECTORY_NAME,EXTENSION);
+      outputPath = FileSystemUtils.generateOutputPath(mDirectory, DIRECTORY_NAME,EXTENSION);
       outputStream = new FileOutputStream(outputPath);
       inputStream.writeTo(outputStream);
     } catch (IOException e) {

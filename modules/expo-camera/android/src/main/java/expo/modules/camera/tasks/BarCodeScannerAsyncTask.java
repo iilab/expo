@@ -1,53 +1,46 @@
 package expo.modules.camera.tasks;
 
-import android.util.SparseArray;
+import expo.interfaces.barcodescanner.BarCodeScanner;
+import expo.interfaces.barcodescanner.BarCodeScannerResult;
 
-import com.google.android.gms.vision.barcode.Barcode;
-import com.google.android.gms.vision.barcode.BarcodeDetector;
-
-import expo.modules.camera.utils.ExpoFrameFactory;
-
-public class BarCodeScannerAsyncTask extends android.os.AsyncTask<Void, Void, Barcode> {
-  private final BarcodeDetector mDetector;
+public class BarCodeScannerAsyncTask extends android.os.AsyncTask<Void, Void, BarCodeScannerResult> {
+  private final BarCodeScanner mBarCodeScanner;
   private byte[] mImageData;
   private int mWidth;
   private int mHeight;
+  private int mRotation;
   private BarCodeScannerAsyncTaskDelegate mDelegate;
 
   public BarCodeScannerAsyncTask(
       BarCodeScannerAsyncTaskDelegate delegate,
-      BarcodeDetector detector,
+      BarCodeScanner barCodeScanner,
       byte[] imageData,
       int width,
-      int height
+      int height,
+      int rotation
   ) {
     mImageData = imageData;
     mWidth = width;
     mHeight = height;
     mDelegate = delegate;
-    mDetector = detector;
+    mBarCodeScanner = barCodeScanner;
+    mRotation = rotation;
   }
 
   @Override
-  protected Barcode doInBackground(Void... ignored) {
+  protected BarCodeScannerResult doInBackground(Void... ignored) {
     if (isCancelled() || mDelegate == null) {
       return null;
     }
 
-    SparseArray<Barcode> result = mDetector.detect(ExpoFrameFactory.buildFrame(mImageData, mWidth, mHeight, 0).getFrame());
-
-    if (result.size() > 0) {
-      return result.valueAt(0);
-    } else {
-      return null;
-    }
+    return mBarCodeScanner.scan(mImageData, mWidth, mHeight, mRotation);
   }
 
   @Override
-  protected void onPostExecute(Barcode result) {
+  protected void onPostExecute(BarCodeScannerResult result) {
     super.onPostExecute(result);
     if (result != null) {
-      mDelegate.onBarCodeRead(result);
+      mDelegate.onBarCodeScanned(result);
     }
     mDelegate.onBarCodeScanningTaskCompleted();
   }

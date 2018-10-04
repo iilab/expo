@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.support.v4.app.NotificationCompat;
 import android.support.v4.content.ContextCompat;
 import android.text.TextUtils;
 import android.view.View;
@@ -19,7 +20,6 @@ import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
 import android.widget.RemoteViews;
 
-import com.amplitude.api.Amplitude;
 import com.facebook.react.ReactInstanceManager;
 import com.facebook.react.ReactPackage;
 import com.facebook.react.bridge.UiThreadUtil;
@@ -31,12 +31,14 @@ import org.json.JSONObject;
 
 import java.io.UnsupportedEncodingException;
 import java.lang.ref.WeakReference;
+import java.util.Collections;
 import java.util.List;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 
 import de.greenrobot.event.EventBus;
+import expo.core.interfaces.Package;
 import host.exp.exponent.ABIVersion;
 import host.exp.exponent.AppLoader;
 import host.exp.exponent.Constants;
@@ -56,6 +58,7 @@ import host.exp.exponent.kernel.KernelConstants;
 import host.exp.exponent.kernel.KernelProvider;
 import host.exp.exponent.notifications.ExponentNotification;
 import host.exp.exponent.notifications.ExponentNotificationManager;
+import host.exp.exponent.notifications.NotificationConstants;
 import host.exp.exponent.notifications.PushNotificationHelper;
 import host.exp.exponent.notifications.ReceivedNotificationEvent;
 import host.exp.exponent.storage.ExponentSharedPreferences;
@@ -63,6 +66,7 @@ import host.exp.exponent.utils.AsyncCondition;
 import host.exp.exponent.utils.ExperienceActivityUtils;
 import host.exp.expoview.Exponent;
 import host.exp.expoview.R;
+import versioned.host.exp.exponent.ExponentPackageDelegate;
 import versioned.host.exp.exponent.ReactUnthemedRootView;
 
 import static host.exp.exponent.kernel.KernelConstants.IS_OPTIMISTIC_KEY;
@@ -72,6 +76,14 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
 
   // Override
   public List<ReactPackage> reactPackages() {
+    return null;
+  }
+  public List<Package> expoPackages() {
+    return Collections.emptyList();
+  }
+
+  @Override
+  public ExponentPackageDelegate getExponentPackageDelegate() {
     return null;
   }
 
@@ -98,13 +110,9 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
   private Handler mNotificationAnimationHandler;
   private Runnable mNotificationAnimator;
   private int mNotificationAnimationFrame;
-  private Notification.Builder mNotificationBuilder;
+  private NotificationCompat.Builder mNotificationBuilder;
   private boolean mIsLoadExperienceAllowedToRun = false;
   private boolean mShouldShowLoadingScreenWithOptimisticManifest = false;
-
-  // In detach we want UNVERSIONED most places. We still need the numbered sdk version
-  // when creating cache keys.
-  private String mDetachSdkVersion;
 
   @Inject
   ExponentManifest mExponentManifest;
@@ -189,7 +197,7 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
     }
 
     if (mManifestUrl != null && shouldOpenImmediately) {
-      new AppLoader(mManifestUrl, mExponentManifest, mExponentSharedPreferences) {
+      new AppLoader(mManifestUrl) {
         @Override
         public void onOptimisticManifest(final JSONObject optimisticManifest) {
           Exponent.getInstance().runOnUiThread(new Runnable() {
@@ -271,9 +279,16 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
       handleOptions(mKernel.popOptionsForManifestUrl(mManifestUrl));
     }
 
-    clearNotifications();
+    // this is old code from before `Expo.Notifications.dismissAllNotificationsAsync` existed
+    // since removing it is a breaking change (people have to call ^^^ explicitly if they want
+    // this behavior) we only do it starting in SDK 28
+    // TODO: eric: remove this once SDK 27 is phased out
+    if (mSDKVersion != null && ABIVersion.toNumber(mSDKVersion) < ABIVersion.toNumber("28.0.0")) {
+      clearNotifications();
+    }
   }
 
+  // TODO: eric: remove this once SDK 27 is phased out
   protected void clearNotifications() {
     String experienceId = mManifest.optString(ExponentManifest.MANIFEST_ID_KEY);
     if (experienceId != null) {
@@ -370,6 +385,8 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
 
     mManifestUrl = manifestUrl;
     mManifest = manifest;
+
+    new ExponentNotificationManager(this).maybeCreateNotificationChannelGroup(mManifest);
 
     Kernel.ExperienceActivityTask task = mKernel.getExperienceActivityTask(mManifestUrl);
     task.taskId = getTaskId();
@@ -613,7 +630,7 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
     Exponent.getInstance().testPackagerStatus(isDebugModeEnabled(), mManifest, new Exponent.PackagerStatusCallback() {
       @Override
       public void onSuccess() {
-        mReactInstanceManager = startReactInstance(ExperienceActivity.this, mIntentUri, mLinkingPackage, mDetachSdkVersion, mNotification, mIsShellApp, reactPackages(), mDevBundleDownloadProgressListener);
+        mReactInstanceManager = startReactInstance(ExperienceActivity.this, mIntentUri, mLinkingPackage, mDetachSdkVersion, mNotification, mIsShellApp, reactPackages(), expoPackages(), mDevBundleDownloadProgressListener);
       }
 
       @Override
@@ -695,7 +712,9 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
     // Build the actual notification
     final NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
     notificationManager.cancel(NOTIFICATION_ID);
-    mNotificationBuilder = new Notification.Builder(this)
+
+    new ExponentNotificationManager(this).maybeCreateExpoPersistentNotificationChannel();
+    mNotificationBuilder = new NotificationCompat.Builder(this, NotificationConstants.NOTIFICATION_EXPERIENCE_CHANNEL_ID)
         .setContent(mNotificationRemoteViews)
         .setSmallIcon(R.drawable.notification_icon)
         .setShowWhen(false)
@@ -744,7 +763,7 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
         );
         kernelReactInstanceManager.onHostResume(ExperienceActivity.this, ExperienceActivity.this);
         addView(mNuxOverlayView);
-        Amplitude.getInstance().logEvent("NUX_EXPERIENCE_OVERLAY_SHOWN");
+        Analytics.logEvent("NUX_EXPERIENCE_OVERLAY_SHOWN");
       }
     });
   }
@@ -782,7 +801,7 @@ public class ExperienceActivity extends BaseExperienceActivity implements Expone
               } catch (JSONException e) {
                 EXL.e(TAG, e.getMessage());
               }
-              Amplitude.getInstance().logEvent("NUX_EXPERIENCE_OVERLAY_DISMISSED", eventProperties);
+              Analytics.logEvent("NUX_EXPERIENCE_OVERLAY_DISMISSED", eventProperties);
             }
 
             public void onAnimationRepeat(Animation animation) {

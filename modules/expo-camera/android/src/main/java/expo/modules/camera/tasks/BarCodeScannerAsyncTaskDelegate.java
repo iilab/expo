@@ -1,8 +1,8 @@
 package expo.modules.camera.tasks;
 
-import com.google.android.gms.vision.barcode.Barcode;
+import expo.interfaces.barcodescanner.BarCodeScannerResult;
 
 public interface BarCodeScannerAsyncTaskDelegate {
-  void onBarCodeRead(Barcode barCode);
+  void onBarCodeScanned(BarCodeScannerResult barCode);
   void onBarCodeScanningTaskCompleted();
 }

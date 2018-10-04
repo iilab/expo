@@ -253,7 +253,17 @@ class SimpleExoPlayerData extends PlayerData
   }
 
   @Override
+  public void onSeekProcessed() {
+
+  }
+
+  @Override
   public void onRepeatModeChanged(int repeatMode) {
+  }
+
+  @Override
+  public void onShuffleModeEnabledChanged(boolean shuffleModeEnabled) {
+
   }
 
   @Override
@@ -287,13 +297,14 @@ class SimpleExoPlayerData extends PlayerData
 
   @Override
   public void onPlayerError(final ExoPlaybackException error) {
-    mErrorListener.onError("Player error: " + error.getMessage());
+    onFatalError(error.getCause());
   }
 
   @Override
-  public void onPositionDiscontinuity() {
+  public void onPositionDiscontinuity(int reason) {
 
   }
+
 
   // ExtractorMediaSource.EventListener
 
@@ -302,11 +313,13 @@ class SimpleExoPlayerData extends PlayerData
     onFatalError(error);
   }
 
-  private void onFatalError(final Exception error) {
+  private void onFatalError(final Throwable error) {
     if (mLoadCompletionListener != null) {
       final LoadCompletionListener listener = mLoadCompletionListener;
       mLoadCompletionListener = null;
       listener.onLoadError(error.toString());
+    } else {
+      mErrorListener.onError("Player error: " + error.getMessage());
     }
     release();
   }

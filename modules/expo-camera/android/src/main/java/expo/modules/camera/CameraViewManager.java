@@ -3,6 +3,7 @@ package expo.modules.camera;
 import android.content.Context;
 
 import com.google.android.cameraview.AspectRatio;
+import com.google.android.cameraview.Size;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,14 +14,16 @@ import expo.core.interfaces.ExpoProp;
 import expo.core.ModuleRegistry;
 import expo.core.interfaces.ModuleRegistryConsumer;
 import expo.core.interfaces.services.UIManager;
+import expo.interfaces.barcodescanner.BarCodeScannerSettings;
 
 public class CameraViewManager extends ViewManager<ExpoCameraView> implements ModuleRegistryConsumer {
   public enum Events {
     EVENT_CAMERA_READY("onCameraReady"),
     EVENT_ON_MOUNT_ERROR("onMountError"),
-    EVENT_ON_BAR_CODE_READ("onBarCodeRead"),
+    EVENT_ON_BAR_CODE_SCANNED("onBarCodeScanned"),
     EVENT_ON_FACES_DETECTED("onFacesDetected"),
-    EVENT_ON_FACE_DETECTION_ERROR("onFaceDetectionError");
+    EVENT_ON_FACE_DETECTION_ERROR("onFaceDetectionError"),
+    EVENT_ON_PICTURE_SAVED("onPictureSaved");
 
     private final String mName;
 
@@ -51,6 +54,11 @@ public class CameraViewManager extends ViewManager<ExpoCameraView> implements Mo
   @Override
   public String getName() {
     return REACT_CLASS;
+  }
+
+  @Override
+  public ViewManagerType getViewManagerType() {
+    return ViewManagerType.GROUP;
   }
 
   @Override
@@ -102,16 +110,14 @@ public class CameraViewManager extends ViewManager<ExpoCameraView> implements Mo
     view.setWhiteBalance(whiteBalance);
   }
 
-  @ExpoProp(name = "barCodeTypes")
-  public void setBarCodeTypes(ExpoCameraView view, List barCodeTypes) {
-    if (barCodeTypes == null) {
-      return;
-    }
-    List<Integer> result = new ArrayList<>(barCodeTypes.size());
-    for (int i = 0; i < barCodeTypes.size(); i++) {
-      result.add(((Double) barCodeTypes.get(i)).intValue());
-    }
-    view.setBarCodeTypes(result);
+  @ExpoProp(name = "pictureSize")
+  public void setPictureSize(ExpoCameraView view, String size) {
+    view.setPictureSize(Size.parse(size));
+  }
+
+  @ExpoProp(name = "barCodeScannerSettings")
+  public void setBarCodeScannerSettings(ExpoCameraView view, Map<String, Object> settings) {
+    view.setBarCodeScannerSettings(new BarCodeScannerSettings(settings));
   }
 
   @ExpoProp(name = "useCamera2Api")
