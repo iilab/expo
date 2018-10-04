@@ -31,6 +31,11 @@ fastlane ios create_simulator_build
 fastlane ios release
 ```
 
+### ios ipasign
+```
+fastlane ios ipasign
+```
+
 
 ----
 
